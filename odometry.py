@@ -4,31 +4,40 @@ import numpy as np
 import cv2 as cv
 import pykitti
 
+import sys
+sys.path.insert(0, './disk')
+
+from disk_feature import DiskFeature2D
+
 class StereoOdometry(object):
     def __init__(self, dataset, verbose=False):
         self.dataset = dataset
-        self.dataset_iterator = iter(dataset.gray)
+        self.image_iterator = iter(dataset.gray)
+        self.true_pose_iterator = iter(dataset.poses)
         self.current_pose = SE3Pose(np.eye(3), np.zeros(3)) 
         self.pose_history = [self.current_pose]
         self.initialized = False
+
+        self.trajectory_image = np.zeros((1200, 1200, 3), dtype=np.int32)
 
         self.left_camera = dataset.calib.P_rect_00
         self.right_camera = dataset.calib.P_rect_10
 
         self.verbose = verbose
+        self.detector = DiskFeature2D()
 
         self.matcher = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
+        # self.matcher = cv.BFMatcher(cv.NORM_L2, crossCheck=True)
 
     def process_next_img(self, visualize=False):
-        image_pair = next(self.dataset_iterator)
+        image_pair = next(self.image_iterator)
+        self.true_pose = next(self.true_pose_iterator)
+        self.true_pose = SE3Pose(self.true_pose[0:3, 0:3], self.true_pose[0:3, 3])
 
-        left_frame = ImageFrame(np.array(image_pair[0]), self.left_camera)
+        left_frame = ImageFrame(np.array(image_pair[0].convert("RGB")), self.left_camera, self.detector)
         left_frame.get_features()
 
-        if visualize:
-            left_frame.display_keypoints()
-
-        right_frame = ImageFrame(np.array(image_pair[1]), self.right_camera)
+        right_frame = ImageFrame(np.array(image_pair[1].convert("RGB")), self.right_camera, self.detector)
         right_frame.get_features()
 
         self.next_stereo_frame = StereoFrame(left_frame, right_frame)
@@ -46,12 +55,26 @@ class StereoOdometry(object):
             self.initialized = True
             
         self.prev_stereo_frame = self.next_stereo_frame
+
+        if visualize:
+            left_frame.display_keypoints()
+            self.display_trajectory()
+
+    def display_trajectory(self, offset=np.array([500, 500])):
+        estimated_coordinates = (self.current_pose.t[[0, 2]] + offset).astype(np.int32)
+        true_coordinates = (self.true_pose.t[[0, 2]] + offset).astype(np.int32)
+
+        self.trajectory_image = cv.circle(self.trajectory_image, tuple(estimated_coordinates), 1, (0,0,255), 2)
+        self.trajectory_image = cv.circle(self.trajectory_image, tuple(true_coordinates), 1, (0,255,0), 2)
+
+        cv.imshow('Trajectory', self.trajectory_image.astype(np.uint8))
+        cv.waitKey(1)
         
 
     def temporal_matches(self, prev_stereo_frame, next_stereo_frame, matching_distance=50):
         all_matches = self.matcher.match(prev_stereo_frame.left.descriptors, next_stereo_frame.left.descriptors)
 
-        matches = []
+        self.matches = []
 
         prev_image_points = []
         prev_3d_points = []
@@ -63,7 +86,7 @@ class StereoOdometry(object):
             if match.distance < matching_distance and \
                 prev_stereo_frame.left.matched_features[match.queryIdx] and \
                 next_stereo_frame.left.matched_features[match.trainIdx]:
-                matches.append(match)
+                self.matches.append(match)
 
                 prev_image_points.append(prev_stereo_frame.left.keypoints[match.queryIdx].pt)
                 prev_3d_points.append(prev_stereo_frame.point_dict_left[match.queryIdx])
@@ -78,19 +101,20 @@ class StereoOdometry(object):
 
 if __name__ == '__main__':
     basedir = '/Users/tarun/Classes/CS231A/project/KITTI/odometry/dataset'
-    sequence = '04'
+    sequence = '00'
     dataset = pykitti.odometry(basedir, sequence)
 
     so = StereoOdometry(dataset)
 
-    num_frames = min(300, len(dataset))
+    num_frames = min(len(dataset), 1000)
     for i in range(num_frames):
         so.process_next_img(True)
-        true_pose = SE3Pose(dataset.poses[i][0:3, 0:3], dataset.poses[i][0:3, 3])
+        r_e, t_e = pose_error(so.current_pose, so.true_pose)
 
-        r_e, t_e = pose_error(so.current_pose, true_pose)
+        print("Current t: ", r_e)
+        print("True t: ", t_e)
 
-        print("Current t: ", so.current_pose.t)
-        print("True t: ", true_pose.t)
+    cv.imwrite('trajectory' + sequence + '.png', so.trajectory_image.astype(np.uint8))
+
 
 

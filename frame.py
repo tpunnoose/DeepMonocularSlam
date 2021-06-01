@@ -2,16 +2,15 @@ import numpy as np
 import cv2 as cv
 
 class ImageFrame(object):
-    def __init__(self, image, camera):
+    def __init__(self, image, camera, detector):
         self.image = image
         self.camera = camera
 
-        self.detector = cv.ORB_create()
-        self.extractor = self.detector
+        # self.detector = cv.ORB_create()
+        self.detector = detector
 
     def get_features(self):
-        self.keypoints = self.detector.detect(self.image)
-        self.descriptors = self.extractor.compute(self.image, self.keypoints)[1]
+        self.keypoints, self.descriptors = self.detector.detectAndCompute(self.image)
         self.matched_features = np.zeros(len(self.keypoints), dtype=bool)
 
     def display_keypoints(self, delay = 1):
@@ -26,6 +25,7 @@ class StereoFrame(object):
         self.left = frame_left
         self.right = frame_right
         self.matcher = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
+        # self.matcher = cv.BFMatcher(cv.NORM_L2, crossCheck=True)
 
     def match_stereo_features(self, matching_distance=40, max_row_distance=2.5, max_disparity=100):
         '''
