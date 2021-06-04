@@ -1,15 +1,11 @@
-from frame import StereoFrame, ImageFrame
+from frame import ImageFrame
+from packnet import DepthPoseEstimator
 from pose import SE3Pose, estimate_pose, pose_error
 import numpy as np
 import cv2 as cv
 import pykitti
 
-import sys
-sys.path.insert(0, './disk')
-
-from disk_feature import DiskFeature2D
-
-class StereoOdometry(object):
+class MonocularOdometry(object):
     def __init__(self, dataset, verbose=False):
         self.dataset = dataset
         self.image_iterator = iter(dataset.gray)
@@ -24,40 +20,85 @@ class StereoOdometry(object):
         self.right_camera = dataset.calib.P_rect_10
 
         self.verbose = verbose
-        self.detector = DiskFeature2D()
+        # self.detector = DiskFeature2D()
+        self.detector = cv.ORB_create()
 
         self.matcher = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
+
+        self.depth_estimator = DepthPoseEstimator()
         # self.matcher = cv.BFMatcher(cv.NORM_L2, crossCheck=True)
 
+
+    # def process_next_img(self, visualize=False):
+    #     image_pair = next(self.image_iterator)
+    #     self.true_pose = next(self.true_pose_iterator)
+    #     self.true_pose = SE3Pose(self.true_pose[0:3, 0:3], self.true_pose[0:3, 3])
+
+    #     self.next_frame = ImageFrame(np.array(image_pair[0].convert("RGB")), image_pair[0].convert("RGB"), self.left_camera, self.detector)
+    #     self.next_frame.get_features()
+    #     self.next_frame.depth = self.depth_estimator.get_depth(self.next_frame)
+
+    #     # right_frame = ImageFrame(np.array(image_pair[1].convert("RGB")), self.right_camera, self.detector)
+    #     # right_frame.get_features()
+
+        
+
+    #     # self.next_stereo_frame = StereoFrame(left_frame, right_frame)
+    #     # self.next_stereo_frame.match_stereo_features()
+    #     # self.next_stereo_frame.triangulate()
+
+    #     if self.initialized:
+    #         prev_image_points, prev_3d_points, next_image_points, next_3d_points = self.temporal_matches(self.prev_frame, self.next_frame)
+    #         pose_guess = SE3Pose(np.zeros(3), np.zeros(3))
+    #         next_pose = estimate_pose(prev_image_points, prev_3d_points, next_image_points, next_3d_points, self.left_camera)
+    #         # next_pose.R = np.eye(3)
+    #         self.current_pose = self.current_pose.compose(next_pose)
+    #         self.pose_history.append(self.current_pose)
+    #     else:
+    #         self.initialized = True
+            
+    #     self.prev_frame = self.next_frame
+
+    #     if visualize:
+    #         left_frame.display_keypoints()
+    #         self.display_trajectory()
+
     def process_next_img(self, visualize=False):
-        image_pair = next(self.image_iterator)
+        image, _ = next(self.image_iterator)
         self.true_pose = next(self.true_pose_iterator)
         self.true_pose = SE3Pose(self.true_pose[0:3, 0:3], self.true_pose[0:3, 3])
 
-        left_frame = ImageFrame(np.array(image_pair[0].convert("RGB")), self.left_camera, self.detector)
-        left_frame.get_features()
+        image_pil = image.convert("RGB")
+        self.next_frame = ImageFrame(np.array(image_pil), image_pil, self.left_camera, self.detector)
+        self.next_frame.get_features()
+        self.next_frame.depth = self.depth_estimator.get_depth(self.next_frame.image_pil)
 
-        right_frame = ImageFrame(np.array(image_pair[1].convert("RGB")), self.right_camera, self.detector)
-        right_frame.get_features()
+        # right_frame = ImageFrame(np.array(image_pair[1].convert("RGB")), self.right_camera, self.detector)
+        # right_frame.get_features()
 
-        self.next_stereo_frame = StereoFrame(left_frame, right_frame)
-        self.next_stereo_frame.match_stereo_features()
-        self.next_stereo_frame.triangulate()
+        
+
+        # self.next_stereo_frame = StereoFrame(left_frame, right_frame)
+        # self.next_stereo_frame.match_stereo_features()
+        # self.next_stereo_frame.triangulate()
 
         if self.initialized:
-            prev_image_points, prev_3d_points, next_image_points, next_3d_points = self.temporal_matches(self.prev_stereo_frame, self.next_stereo_frame)
-            pose_guess = SE3Pose(np.zeros(3), np.zeros(3))
-            next_pose = estimate_pose(prev_image_points, prev_3d_points, next_image_points, next_3d_points, self.left_camera)
-            # next_pose.R = np.eye(3)
+            T = self.depth_estimator.get_pose(self.next_frame.image_pil, self.prev_frame_1.image_pil, self.prev_frame_2.image_pil)
+            next_pose = SE3Pose(T[0:3, 0:3], T[0:3,3])
             self.current_pose = self.current_pose.compose(next_pose)
+
+            print("True pose: ", self.true_pose.matrix())
+            print("Estimated pose: ", self.current_pose.matrix())
             self.pose_history.append(self.current_pose)
         else:
             self.initialized = True
+            self.prev_frame_1 = self.next_frame
             
-        self.prev_stereo_frame = self.next_stereo_frame
+        self.prev_frame_2 = self.prev_frame_1
+        self.prev_frame_1 = self.next_frame
 
         if visualize:
-            left_frame.display_keypoints()
+            self.next_frame.display_keypoints()
             self.display_trajectory()
 
     def display_trajectory(self, offset=np.array([500, 500])):
@@ -71,8 +112,8 @@ class StereoOdometry(object):
         cv.waitKey(1)
         
 
-    def temporal_matches(self, prev_stereo_frame, next_stereo_frame, matching_distance=50):
-        all_matches = self.matcher.match(prev_stereo_frame.left.descriptors, next_stereo_frame.left.descriptors)
+    def temporal_matches(self, prev_frame, next_frame, matching_distance=50):
+        all_matches = self.matcher.match(prev_frame.descriptors, next_frame.descriptors)
 
         self.matches = []
 
@@ -84,15 +125,15 @@ class StereoOdometry(object):
 
         for match in all_matches:
             if match.distance < matching_distance and \
-                prev_stereo_frame.left.matched_features[match.queryIdx] and \
-                next_stereo_frame.left.matched_features[match.trainIdx]:
+                prev_frame.matched_features[match.queryIdx] and \
+                next_frame.matched_features[match.trainIdx]:
                 self.matches.append(match)
 
-                prev_image_points.append(prev_stereo_frame.left.keypoints[match.queryIdx].pt)
-                prev_3d_points.append(prev_stereo_frame.point_dict_left[match.queryIdx])
+                prev_image_points.append(prev_frame.keypoints[match.queryIdx].pt)
+                prev_3d_points.append(prev_frame.point_dict_left[match.queryIdx])
 
-                next_image_points.append(next_stereo_frame.left.keypoints[match.trainIdx].pt)
-                next_3d_points.append(next_stereo_frame.point_dict_left[match.trainIdx])
+                next_image_points.append(next_frame.keypoints[match.trainIdx].pt)
+                next_3d_points.append(next_frame.point_dict_left[match.trainIdx])
 
         if self.verbose:
             print("Number of successful temporal matches: ", len(matches))
@@ -104,17 +145,14 @@ if __name__ == '__main__':
     sequence = '00'
     dataset = pykitti.odometry(basedir, sequence)
 
-    so = StereoOdometry(dataset)
+    mo = MonocularOdometry(dataset)
 
     num_frames = min(len(dataset), 1000)
     for i in range(num_frames):
-        so.process_next_img(True)
-        r_e, t_e = pose_error(so.current_pose, so.true_pose)
+        mo.process_next_img(False)
+        r_e, t_e = pose_error(mo.current_pose, mo.true_pose)
 
-        print("Current t: ", r_e)
-        print("True t: ", t_e)
-
-    cv.imwrite('trajectory' + sequence + '.png', so.trajectory_image.astype(np.uint8))
+    cv.imwrite('trajectory' + sequence + '.png', mo.trajectory_image.astype(np.uint8))
 
 
 

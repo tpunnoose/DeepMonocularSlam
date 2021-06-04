@@ -2,15 +2,16 @@ import numpy as np
 import cv2 as cv
 
 class ImageFrame(object):
-    def __init__(self, image, camera, detector):
+    def __init__(self, image, image_pil, camera, detector):
         self.image = image
         self.camera = camera
 
         # self.detector = cv.ORB_create()
         self.detector = detector
+        self.image_pil = image_pil
 
     def get_features(self):
-        self.keypoints, self.descriptors = self.detector.detectAndCompute(self.image)
+        self.keypoints, self.descriptors = self.detector.detectAndCompute(self.image, None)
         self.matched_features = np.zeros(len(self.keypoints), dtype=bool)
 
     def display_keypoints(self, delay = 1):
@@ -19,38 +20,6 @@ class ImageFrame(object):
         cv.imshow("Keypoints Left", img)
         cv.waitKey(delay)
 
-
-class StereoFrame(object):
-    def __init__(self, frame_left, frame_right):
-        self.left = frame_left
-        self.right = frame_right
-        self.matcher = cv.BFMatcher(cv.NORM_HAMMING, crossCheck=True)
-        # self.matcher = cv.BFMatcher(cv.NORM_L2, crossCheck=True)
-
-    def match_stereo_features(self, matching_distance=40, max_row_distance=2.5, max_disparity=100):
-        '''
-        Use self.matcher to return matches between two stereo frames. 
-        '''
-        all_matches = self.matcher.match(self.left.descriptors, self.right.descriptors)
-        self.matches = []
-        
-        for match in all_matches:
-            left_pt = self.left.keypoints[match.queryIdx].pt
-            right_pt = self.right.keypoints[match.trainIdx].pt
-
-            if match.distance < matching_distance and \
-                abs(left_pt[1] - right_pt[1]) < max_row_distance and \
-                abs(left_pt[0] - right_pt[0]) < max_disparity:
-                self.matches.append(match)
-                self.left.matched_features[match.queryIdx] = True
-                self.right.matched_features[match.trainIdx] = True
-
-        # print("Number of successful stereo matches: ", len(self.matches))
-
-    def triangulate(self):
-        left_points = np.array([self.left.keypoints[m.queryIdx].pt for m in self.matches])
-        right_points = np.array([self.right.keypoints[m.trainIdx].pt for m in self.matches])
-        three_d_points = cv.triangulatePoints(self.left.camera, self.right.camera, left_points.T, right_points.T).T
-
-        self.point_dict_left = dict(zip([m.queryIdx for m in self.matches], list(three_d_points)))
-        
+    def process_depth(self):
+        for kp in self.keypoints:
+            point_3d = self.depth[kp.pt[0], kp.pt[1]] * np.linalg.inv(self.camera[0:3, 0:3]) @ kp.pt

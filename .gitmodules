@@ -1,0 +1,6 @@
+[submodule "submodules/packnet-sfm"]
+	path = submodules/packnet-sfm
+	url = https://github.com/TRI-ML/packnet-sfm.git
+[submodule "submodules/disk"]
+	path = submodules/disk
+	url = https://github.com/cvlab-epfl/disk.git
