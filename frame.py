@@ -5,6 +5,7 @@ class ImageFrame(object):
     def __init__(self, image, image_pil, camera, detector):
         self.image = image
         self.camera = camera
+        self.camera_inv = np.linalg.inv(camera[0:3, 0:3])
 
         # self.detector = cv.ORB_create()
         self.detector = detector
@@ -21,5 +22,8 @@ class ImageFrame(object):
         cv.waitKey(delay)
 
     def process_depth(self):
-        for kp in self.keypoints:
-            point_3d = self.depth[kp.pt[0], kp.pt[1]] * np.linalg.inv(self.camera[0:3, 0:3]) @ kp.pt
+        self.points_3d = np.zeros((3, len(self.keypoints)))
+        for i, kp in enumerate(self.keypoints):
+            self.points_3d[:, i] = self.depth[int(kp.pt[1]), int(kp.pt[0])] * self.camera_inv @ np.hstack((kp.pt, 1))
+
+        self.points_3d = np.vstack((self.points_3d, np.ones(len(self.keypoints))))

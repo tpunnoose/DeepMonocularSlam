@@ -25,9 +25,9 @@ class DepthPoseEstimator(object):
         image = self.process_pil_image(image)
 
         pred_inv_depth = self.model_wrapper.depth(image)[0]
-        depth = inv2depth(pred_inv_depth)
+        depth = inv2depth(pred_inv_depth).squeeze()
 
-        return depth
+        return depth.detach().numpy()
 
     def get_pose(self, cur_image, prev_image_1, prev_image_2):
         cur_image = self.process_pil_image(cur_image)
